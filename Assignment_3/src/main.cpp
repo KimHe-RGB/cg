@@ -19,13 +19,13 @@ using namespace Eigen;
 // Scene setup, global variables
 ////////////////////////////////////////////////////////////////////////////////
 
-const std::string filename("raytrace.png");
+const std::string filename("raytrace-refraction.png");
 
 //Camera settings
 const double focal_length = 10;
 const double field_of_view = 0.7854; //45 degrees
 const double image_z = 5;
-const bool is_perspective = false;
+const bool is_perspective = true;
 const Vector3d camera_position(0, 0, 5);
 
 //Maximum number of recursive calls
@@ -69,10 +69,10 @@ void setup_scene()
     sphere_centers.emplace_back(10, 0, 1);
     sphere_radii.emplace_back(1);
 
-    sphere_centers.emplace_back(7, 0.05, -1);
+    sphere_centers.emplace_back(7, 0.05, -2);
     sphere_radii.emplace_back(1);
 
-    sphere_centers.emplace_back(4, 0.1, 1);
+    sphere_centers.emplace_back(4, 0.1, -5); // move this ball from z = 1 to -5, this ball is in focal
     sphere_radii.emplace_back(1);
 
     sphere_centers.emplace_back(1, 0.2, -1);
@@ -129,25 +129,33 @@ double lerp(double a0, double a1, double w)
 {
     assert(w >= 0);
     assert(w <= 1);
-    //TODO implement linear and cubic interpolation
-    return 0;
+    // DONE implement linear and cubic interpolation
+	// linear
+	if (false) {
+    	return a0 + w * (a1 - a0);
+	}
+	else {
+		return (a1 - a0) * (3.0 - w * 2.0) * w * w + a0;
+	}
 }
 
 // Computes the dot product of the distance and gradient vectors.
 double dotGridGradient(int ix, int iy, double x, double y)
 {
-    //TODO: Compute the distance vector
-    //TODO: Compute and return the dot-product
-    return 0;
+    // DONE: Compute the distance vector
+    double dx = x - (double) ix;
+    double dy = y - (double) iy;
+    // DONE: Compute and return the dot-product
+    return (dx * grid[ix][iy][0] + dy * grid[ix][iy][1]);
 }
 
 // Compute Perlin noise at coordinates x, y
 double perlin(double x, double y)
 {
-    //TODO: Determine grid cell coordinates x0, y0
-    int x0 = 0;
+    // DONE: Determine grid cell coordinates x0, y0
+    int x0 = int(x); // floor(x)
     int x1 = x0 + 1;
-    int y0 = 0;
+    int y0 = int(y); // floor(y)
     int y1 = y0 + 1;
 
     // Determine interpolation weights
@@ -177,13 +185,13 @@ Vector4d procedural_texture(const double tu, const double tv)
     assert(tu <= 1);
     assert(tv <= 1);
 
-    //TODO: uncomment these lines once you implement the perlin noise
-    // const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
-    // return Vector4d(0, color, 0, 0);
+    // DONE: uncomment these lines once you implement the perlin noise
+    const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
+    return Vector4d(0, color, 0, 0);
 
     //Example for checkerboard texture
-    const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
-    return Vector4d(0, color, 0, 0);
+    // const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
+    // return Vector4d(0, color, 0, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -193,24 +201,38 @@ Vector4d procedural_texture(const double tu, const double tv)
 //Compute the intersection between a ray and a sphere, return -1 if no intersection
 double ray_sphere_intersection(const Vector3d &ray_origin, const Vector3d &ray_direction, int index, Vector3d &p, Vector3d &N)
 {
-    // TODO, implement the intersection between the ray and the sphere at index index.
+    // DONE, implement the intersection between the ray and the sphere at index index.
     //return t or -1 if no intersection
 
     const Vector3d sphere_center = sphere_centers[index];
     const double sphere_radius = sphere_radii[index];
 
     double t = -1;
+	double b = ray_direction.dot(ray_origin - sphere_center) * 2;
+	double a = ray_direction.squaredNorm();
+	double c = (ray_origin - sphere_center).squaredNorm() - sphere_radius * sphere_radius;
+	Vector3d ray_intersection;
+	Vector3d ray_normal;
+	if (b * b - 4 * a * c > 0) {
+		// the positive solution with smaller norm is the first time where ray intersects the sphere
+		double t1 = (-b - sqrt(b * b - 4 * a * c)) / 2 / a;
+		double t2 = (-b + sqrt(b * b - 4 * a * c)) / 2 / a;
+		// the two solutions cannot be both negative
+		if (std::max(t1, t2) < 0) return -1;
+        if (std::min(t1, t2) > 0) {
+            t = std::min(t1, t2);
+        } else {
+            t = std::max(t1, t2);
+        }
+		ray_intersection = ray_origin + t * ray_direction;
+		ray_normal = (ray_intersection - sphere_center).normalized();
+	}
 
-    if (false)
+    if (t > 0)
     {
-        return -1;
-    }
-    else
-    {
-        //TODO set the correct intersection point, update p to the correct value
-        p = ray_origin;
-        N = ray_direction;
-
+        // DONE set the correct intersection point, update p to the correct value
+        p = ray_intersection;
+        N = ray_normal;
         return t;
     }
 
@@ -220,23 +242,55 @@ double ray_sphere_intersection(const Vector3d &ray_origin, const Vector3d &ray_d
 //Compute the intersection between a ray and a paralleogram, return -1 if no intersection
 double ray_parallelogram_intersection(const Vector3d &ray_origin, const Vector3d &ray_direction, int index, Vector3d &p, Vector3d &N)
 {
-    // TODO, implement the intersection between the ray and the parallelogram at index index.
+    // DONE, implement the intersection between the ray and the parallelogram at index index.
     //return t or -1 if no intersection
 
     const Vector3d pgram_origin = parallelograms[index].col(0);
     const Vector3d A = parallelograms[index].col(1);
     const Vector3d B = parallelograms[index].col(2);
-    const Vector3d pgram_u = A - pgram_origin;
-    const Vector3d pgram_v = B - pgram_origin;
+    const Vector3d pgram_u = A - pgram_origin; // A -> O
+    const Vector3d pgram_v = B - pgram_origin; // B -> O
 
-    if (false)
+	// compute C: the top right corner which is diagonal of origin. counterclock wise direction center at origin: A, C, B
+	Vector3d C = A + B - pgram_origin; 
+	Vector3d pgram_c = C - pgram_origin;
+
+	Vector3d hitPosition;
+	Vector3d hitNormal;
+	double t = -1;
+
+	// Check if the ray intersects with the parallelogram
+	Matrix3d AA;
+	AA << -pgram_u(0), -pgram_c(0), ray_direction[0], 
+		  -pgram_u(1), -pgram_c(1), ray_direction[1], 
+	      -pgram_u(2), -pgram_c(2), ray_direction[2];
+	Matrix3d AB;
+	AB << -pgram_v(0), -pgram_c(0), ray_direction[0], 
+		  -pgram_v(1), -pgram_c(1), ray_direction[1], 
+		  -pgram_v(2), -pgram_c(2), ray_direction[2];
+
+	Vector3d uvt = AA.colPivHouseholderQr().solve(pgram_origin - ray_origin);
+	Vector3d uvt2 = AB.colPivHouseholderQr().solve(pgram_origin - ray_origin);
+	if (uvt(2) > 0 && uvt(0) > 0 && uvt(1) > 0 && uvt(0)+uvt(1)<1) {
+		// intersection point position and normal vector direction
+		hitPosition = ray_origin + uvt(2) * ray_direction;
+		hitNormal = (pgram_c.cross(pgram_u)).normalized();
+		t = (hitPosition - ray_origin).norm() / ray_direction.norm();
+	}
+	else if (uvt2(2) > 0 && uvt2(0) > 0 && uvt2(1) > 0 && uvt2(0)+uvt2(1)<1) {
+		// intersection point position and normal vector direction
+		hitPosition = ray_origin + uvt2(2) * ray_direction;
+		hitNormal = (pgram_v.cross(pgram_c)).normalized();
+		t = (hitPosition - ray_origin).norm() / ray_direction.norm();
+	}
+
+    if (t > 0)
     {
-        return -1;
+        // DONE set the correct intersection point, update p and N to the correct values
+		p = hitPosition;
+		N = hitNormal;
+		return t;
     }
-
-    //TODO set the correct intersection point, update p and N to the correct values
-    p = ray_origin;
-    N = p.normalized();
 
     return -1;
 }
@@ -299,13 +353,33 @@ bool is_light_visible(const Vector3d &ray_origin, const Vector3d &ray_direction,
 {
     // TODO: Determine if the light is visible here
     // Use find_nearest_object
-    return true;
+	Vector3d hitPosition;
+	Vector3d hitNormal;
+
+	const int index = find_nearest_object(ray_origin, ray_direction, hitPosition, hitNormal);
+	// if the shadow ray does not hit anything, then the light is visible here
+	if (index < 0) return true;
+	// if it does hit something, 
+    // we check if the ray hit the object first, or it reach light_position first, by comparing the distance
+    // if the shadow ray hit the object first, then it is not visible!
+	return (light_position - ray_origin).norm() < (hitPosition - ray_origin).norm();
+}
+
+Vector3d RefractionDirection(const Vector3d &I, const Vector3d &N, const double eta){
+    double cosi = -N.dot(I);
+    double k = 1 - eta * eta * (1 - cosi * cosi);
+    Vector3d refrdir = I * eta + N * (eta *  cosi - sqrt(k));
+    return refrdir.normalized();
 }
 
 Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, int max_bounce)
 {
+    // Return a transparent color if exceed max bounce times
+    if (max_bounce < 1) return Vector4d(0, 0, 0, 0);
+
     //Intersection point and normal, these are output of find_nearest_object
     Vector3d p, N;
+    Vector4d C;
 
     const int nearest_object = find_nearest_object(ray_origin, ray_direction, p, N);
 
@@ -314,9 +388,10 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
         // Return a transparent color
         return Vector4d(0, 0, 0, 0);
     }
+	const Vector3d small_epsilon = 1e-4 * N;
 
     // Ambient light contribution
-    const Vector4d ambient_color = obj_ambient_color.array() * ambient_light.array();
+    const Vector4d ambient_color = obj_ambient_color.array().cwiseProduct(ambient_light.array());
 
     // Punctual lights contribution (direct lighting)
     Vector4d lights_color(0, 0, 0, 0);
@@ -327,7 +402,22 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
 
         const Vector3d Li = (light_position - p).normalized();
 
-        // TODO: Shoot a shadow ray to determine if the light should affect the intersection point and call is_light_visible
+        // DONE: Shoot a shadow ray to determine if the light should affect the intersection point and call is_light_visible
+        /**
+         * @attention We need to add a small epsilon to the shadow ray intersection to make sure that
+         * the intersection point is *above* the shaded plane. 
+         * We do so by adding 1e-4 * surface normal vector to the position. 
+         * We assume that the IEEE error introduced in intersection caculation to be smaller than this amount
+         * 
+         * If not offsetted, due to IEEE Float errors, the computed intersection position can be 
+         * slightly below the surface, and the shadow ray will hit the surface again.
+         * In which case, the shadow will not be rendered at random points
+         */
+        const Vector3d shadow_origin = p + small_epsilon;
+		const Vector3d shadow_direction = (light_position - shadow_origin).normalized();
+		bool isVisible = is_light_visible(shadow_origin, shadow_direction, light_position);
+		// the light does not affect the intersection point so we skip this light source.
+        if (!isVisible) continue;
 
         Vector4d diff_color = obj_diffuse_color;
 
@@ -343,17 +433,21 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
             diff_color = procedural_texture(tu, tv);
         }
 
-        // TODO: Add shading parameters
+        // DONE: Add shading parameters
 
         // Diffuse contribution
-        const Vector4d diffuse = diff_color * std::max(Li.dot(N), 0.0);
+        const Vector4d diffuse = std::max(Li.dot(N), 0.0) * diff_color;
 
         // Specular contribution, use obj_specular_color
-        const Vector4d specular(0, 0, 0, 0);
+        const Vector3d V = (ray_origin - p).normalized();
+        const Vector3d L = (light_position - p).normalized();
+        const Vector3d H = (V + L).normalized();
+        const Vector4d specular = pow(H.dot(N), obj_specular_exponent) * obj_specular_color;
 
         // Attenuate lights according to the squared distance to the lights
         const Vector3d D = light_position - p;
         lights_color += (diffuse + specular).cwiseProduct(light_color) / D.squaredNorm();
+        
     }
 
     Vector4d refl_color = obj_reflection_color;
@@ -361,16 +455,56 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
     {
         refl_color = Vector4d(0.5, 0.5, 0.5, 0);
     }
-    // TODO: Compute the color of the reflected ray and add its contribution to the current point color.
+    // DONE: Compute the color of the reflected ray and add its contribution to the current point color.
     // use refl_color
+    /**
+     * @attention Same as shadow ray, We need to add a small epsilon to the shadow ray intersection to make sure that
+     * the intersection point is *above* the shaded plane. 
+     * @remark r = 2(n·v)n - v, where v is the vier direction
+     */
     Vector4d reflection_color(0, 0, 0, 0);
+    Vector3d v = -ray_direction;
+    Vector3d r_origin = p + small_epsilon; 
+    Vector3d r_direction = 2*(v.dot(N))*N - v; 
+    Vector4d res = shoot_ray(r_origin, r_direction, max_bounce-1);
+    reflection_color(0) += refl_color(0) * res(0);
+    reflection_color(1) += refl_color(1) * res(1);
+    reflection_color(2) += refl_color(2) * res(2);
 
-    // TODO: Compute the color of the refracted ray and add its contribution to the current point color.
+    // DONE: Compute the color of the refracted ray and add its contribution to the current point color.
     //       Make sure to check for total internal reflection before shooting a new ray.
     Vector4d refraction_color(0, 0, 0, 0);
 
-    // Rendering equation
-    Vector4d C = ambient_color + lights_color + reflection_color + refraction_color;
+    // skip the parallelogram, make sure the ray is entering the surface, not exiting
+    if (nearest_object != 7) {
+        // The refractive indices of object and air are 1.5 and 1
+
+        // normal vector N calculated is always pointing outwards of an surface
+        Vector3d t_direction; Vector3d t_origin;
+        if (ray_direction.dot(N) > 0) 
+        { 
+            // ray is inside and exiting the surface, make sure the new ray start outside the ball
+            double ior = 1.2 / 1;
+            t_origin = p + small_epsilon;
+            t_direction = RefractionDirection(ray_direction, -N, ior);
+        } 
+        else 
+        {
+            // entering the surface, make sure the new ray start inside the ball
+            double ior = 1 / 1.2;
+            t_origin = p - small_epsilon;
+            t_direction = RefractionDirection(ray_direction, N, ior);
+        }
+        Vector4d res2 = shoot_ray(t_origin, t_direction, max_bounce-1);
+        refraction_color(0) = obj_refraction_color(0) * res2(0);
+        refraction_color(1) = obj_refraction_color(1) * res2(1);
+        refraction_color(2) = obj_refraction_color(2) * res2(2);
+        // Rendering equation
+        // C = ambient_color + lights_color + 0.6 * reflection_color + 0.4 * refraction_color;
+    } else {
+        // Rendering equation
+        C = ambient_color + lights_color + reflection_color + refraction_color;
+    }
 
     //Set alpha to 1
     C(3) = 1;
@@ -379,6 +513,9 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+double doubleRand() {
+  return double(std::rand()) / (double(RAND_MAX) + 1.0);
+}
 
 void raytrace_scene()
 {
@@ -391,12 +528,20 @@ void raytrace_scene()
     MatrixXd B = MatrixXd::Zero(w, h);
     MatrixXd A = MatrixXd::Zero(w, h); // Store the alpha mask
 
+    // alloc space for DoF graphic
+    MatrixXd R2 = MatrixXd::Zero(w, h);
+    MatrixXd G2 = MatrixXd::Zero(w, h);
+    MatrixXd B2 = MatrixXd::Zero(w, h);
+    MatrixXd A2 = MatrixXd::Zero(w, h); 
+
     // The camera always points in the direction -z
     // The sensor grid is at a distance 'focal_length' from the camera center,
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
-    double image_y = 1; //TODO: compute the correct pixels size
-    double image_x = 1; //TODO: compute the correct pixels size
+	double tan_half_view = std::tan(field_of_view/2);
+    double L = 2 * tan_half_view * focal_length;
+    double image_y = L / aspect_ratio; // DONE: compute the correct pixels size
+    double image_x = L; // DONE: compute the correct pixels size
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, -image_z);
@@ -407,7 +552,7 @@ void raytrace_scene()
     {
         for (unsigned j = 0; j < h; ++j)
         {
-            // TODO: Implement depth of field
+            // DONE: Implement depth of field
             const Vector3d pixel_center = image_origin + (i + 0.5) * x_displacement + (j + 0.5) * y_displacement;
 
             // Prepare the ray
@@ -416,25 +561,73 @@ void raytrace_scene()
 
             if (is_perspective)
             {
-                // TODO: Perspective camera
+                /**
+				 * @brief Implement depth of field in Perspective camera:
+				 * use perlin noise to sample randomly around the camera position, create multiple rays and take average. 
+				 * we want to make sure that all such rays intersects at the focal plane
+				 */
+                // lets do 4 random rays, all weights add up to 1
+				int num_of_rand_rays = 4;
+				double weight = 0.25;
+				// define the range of the camera hole. we generate random rays by generating points randomly in this range.
+				double aperture_x = 0.1;
+				double aperture_y = 0.1;
+
+				// compute the virtual focal point using some geometry, so that ANY random rays coming out should cross this focal point
+				// assume that the main ray passing the center of the pixel is coming out from the camera center
+
+                // focal plane is the same plane of the pixel grid
+                // the pixel center is just at the focal
+                Vector3d focal = pixel_center;
+				for (int k = 0; k < num_of_rand_rays; k++)
+				{
+                    // we may use perlin noise here on the pixel grid alternatively
+					double sample_x = camera_position(0) + (doubleRand() - 0.5) * aperture_x;
+					double sample_y = camera_position(1) + (doubleRand() - 0.5) * aperture_y;
+					// compute the ray starting from the random generated point, towards the focal point
+					Vector3d rand_ray_origin(sample_x, sample_y, camera_position(2));
+					Vector3d rand_ray_direction = (focal - rand_ray_origin).normalized();
+					// shoot the random ray
+					const Vector4d Cx = shoot_ray(rand_ray_origin, rand_ray_direction, max_bounce);
+					R2(i, j) += weight * Cx(0);
+					G2(i, j) += weight * Cx(1);
+					B2(i, j) += weight * Cx(2);
+                    A2(i, j) += weight * Cx(3);
+                    // for the transparency channel,
+                    // we need make sure it finally become 1 for all pixels that are hit by the main ray
+				}
+
+                /**
+                 * @brief Here we create the unblurred picture 
+                 */
+				// DONE: Perspective camera
+				ray_origin = camera_position;
+				ray_direction = (pixel_center - camera_position).normalized();
+				// shoot the main ray
+				const Vector4d C = shoot_ray(ray_origin, ray_direction, max_bounce);
+				R(i, j) += C(0);
+				G(i, j) += C(1);
+				B(i, j) += C(2);
+				A(i, j) += C(3);
             }
             else
             {
                 // Orthographic camera
                 ray_origin = camera_position + Vector3d(pixel_center[0], pixel_center[1], 0);
                 ray_direction = Vector3d(0, 0, -1);
+				// depth of field does not exist for Orthographic camera: everything will be in focal
+				const Vector4d C = shoot_ray(ray_origin, ray_direction, max_bounce);
+				R(i, j) = C(0);
+				G(i, j) = C(1);
+				B(i, j) = C(2);
+				A(i, j) = C(3);
             }
-
-            const Vector4d C = shoot_ray(ray_origin, ray_direction, max_bounce);
-            R(i, j) = C(0);
-            G(i, j) = C(1);
-            B(i, j) = C(2);
-            A(i, j) = C(3);
         }
     }
 
     // Save to png
     write_matrix_to_png(R, G, B, A, filename);
+    write_matrix_to_png(R2, G2, B2, A2, "blurred-refraction.png");
 }
 
 ////////////////////////////////////////////////////////////////////////////////

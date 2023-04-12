@@ -45,8 +45,16 @@ public:
 // Scene setup, global variables
 ////////////////////////////////////////////////////////////////////////////////
 const std::string data_dir = DATA_DIR;
-const std::string filename("raytrace.png");
-const std::string mesh_filename(data_dir + "dodeca.off");
+// const std::string mesh_filename(data_dir + "dodeca.off");
+// const std::string filename("raytrace_dodeca.png");
+// const std::string mesh_filename(data_dir + "cube.off");
+// const std::string filename("raytrace_cube.png");
+// const std::string mesh_filename(data_dir + "bunny.off");
+// const std::string filename("raytrace_bunny.png");
+const std::string mesh_filename(data_dir + "dragon.off");
+const std::string filename("raytrace_dragon.png");
+
+
 
 //Camera settings
 const double focal_length = 2;
@@ -137,6 +145,77 @@ AlignedBox3d bbox_from_triangle(const Vector3d &a, const Vector3d &b, const Vect
     return box;
 }
 
+
+int RecursiveBuildTree(const MatrixXd &V, const MatrixXi &F, const MatrixXd &centroids, 
+std::vector<AABBTree::Node> &nodes, std::vector<int> &S, int parent)
+{
+    // Create a new node for the current subtree
+    AABBTree::Node node;
+    node.parent = parent;
+    node.left = -1; node.right = -1; node.triangle = -1;
+    int node_index = nodes.size();
+    nodes.push_back(node);
+        
+    // If there is only one triangle in the set, assign it to the node and return
+    if (S.size() == 1) {
+        int start = S.at(0);
+        nodes[node_index].triangle = start; 
+        nodes[node_index].bbox = bbox_from_triangle(V.row(F(start, 0)), V.row(F(start, 1)), V.row(F(start, 2)));
+        return node_index;
+    }
+
+    // Compute the bounding box of all centroids of triags in this subset
+    MatrixXd sub_centroids(S.size(), 3);
+    for (unsigned i = 0; i < S.size(); i++){
+        sub_centroids.row(i) = centroids.row(S.at(i));
+    }
+    Vector3d max_xyz = sub_centroids.colwise().maxCoeff(); // [max_x, max_y, max_z]
+    Vector3d min_xyz = sub_centroids.colwise().minCoeff(); // [min_x, min_y, min_z]
+    Eigen::Index maxRow, maxCol;
+    double max_axis = (max_xyz - min_xyz).maxCoeff(&maxRow, &maxCol);
+    int maxComp = maxRow; // x=0, y=1, z=2
+    double max_axis_center = (max_xyz(maxRow) + min_xyz(maxRow)) / 2;
+
+    // 1. Split the input set of triangles into two sets S1 and S2.
+    std::vector<int> S1;
+    std::vector<int> S2;
+    for (unsigned i = 0; i < S.size(); i++)
+    {
+        int triag_index = S.at(i);
+        // S1 will hold the left half (rounded up), 
+        if(centroids(triag_index, maxComp) <= max_axis_center){
+            S1.push_back(triag_index);
+        } 
+        // and S2 will hold the right half (rounded down).
+        else {
+            S2.push_back(triag_index);
+        }
+    }
+    // we should ensure that recursion is making progress reducing the size of the set
+    assert(S1.size() > 0 && S2.size() > 0);
+    
+    // 2. Recursively build the subtree T1 corresponding to S1.
+    // 3. Recursively build the subtree T2 corresponding to S2.
+    int left_child = RecursiveBuildTree(V, F, centroids, nodes, S1, node_index);
+    int right_child = RecursiveBuildTree(V, F, centroids, nodes, S2, node_index);
+    assert(left_child >= 0); assert(right_child >= 0);
+    nodes[node_index].left = left_child;
+    nodes[node_index].right = right_child;
+
+    // 4. Update the box of the current node by merging boxes of the root of T1 and T2.
+    if (left_child == -1) {
+        nodes[node_index].bbox = nodes[right_child].bbox;
+    }
+    else if (right_child == -1){
+        nodes[node_index].bbox = nodes[left_child].bbox;
+    }
+    else {
+        nodes[node_index].bbox = nodes[left_child].bbox.merged(nodes[right_child].bbox);
+    }
+    return node_index;
+}
+
+
 AABBTree::AABBTree(const MatrixXd &V, const MatrixXi &F)
 {
     // Compute the centroids of all the triangles in the input mesh
@@ -151,10 +230,15 @@ AABBTree::AABBTree(const MatrixXd &V, const MatrixXi &F)
         centroids.row(i) /= F.cols();
     }
 
-    // TODO
-
+    // DONE
     // Split each set of primitives into 2 sets of roughly equal size,
     // based on sorting the centroids along one direction or another.
+    nodes = std::vector<Node>();
+    // S is the set of indexes of triangles, indexing from 0 to F.rows()
+    std::vector<int> S(F.rows());
+    std::iota(S.begin(), S.end(), 0);
+    root = RecursiveBuildTree(V, F, centroids, nodes, S, -1);    
+    std::cout << "Finish building AABB tree\n";
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -163,19 +247,97 @@ AABBTree::AABBTree(const MatrixXd &V, const MatrixXi &F)
 
 double ray_triangle_intersection(const Vector3d &ray_origin, const Vector3d &ray_direction, const Vector3d &a, const Vector3d &b, const Vector3d &c, Vector3d &p, Vector3d &N)
 {
-    // TODO
+    // DONE
     // Compute whether the ray intersects the given triangle.
     // If you have done the parallelogram case, this should be very similar to it.
+    Matrix3d AA;
+    Vector3d ba = b - a;
+    Vector3d ca = c - a;
+    AA << -ba(0), -ca(0), ray_direction(0), 
+          -ba(1), -ca(1), ray_direction(1), 
+          -ba(2), -ca(2), ray_direction(2);
+    if (AA.determinant() == 0) return -1;
+	Vector3d uvt = AA.colPivHouseholderQr().solve(a - ray_origin);
+    if (uvt(2) > 0 && uvt(0) > 0 && uvt(1) > 0 && uvt(0)+uvt(1)<1) {
+        p = ray_origin + ray_direction * uvt(2);
+        N = (ba.cross(ca)).normalized();
+        
+        // return intersection time
+        return uvt(2);
+    }
 
     return -1;
 }
 
 bool ray_box_intersection(const Vector3d &ray_origin, const Vector3d &ray_direction, const AlignedBox3d &box)
 {
-    // TODO
+    // DONE
     // Compute whether the ray intersects the given box.
     // we are not testing with the real surface here anyway.
-    return false;
+
+    int BLF = box.BottomLeftFloor;
+    int TRC = box.TopRightCeil;
+
+    double tmin = -INFINITY, tmax = INFINITY;
+    for (unsigned i = 0; i < 3; i++)
+    {
+        // x=0, y=1, z=2
+        double dir_comp = ray_direction[i];
+        if (dir_comp != 0.0) {
+            // BottomLeftFloor = (min_x, min_y, min_z)
+            double bbox_min_x = box.corner(box.BottomLeftFloor)(i);
+            // TopRightCeil = (max_x, max_y, max_z)
+            double bbox_max_x = box.corner(box.TopRightCeil)(i);
+
+            double tx1 = (bbox_min_x - ray_origin(i)) / dir_comp;
+            double tx2 = (bbox_max_x - ray_origin(i)) / dir_comp;
+
+            tmin = std::max(tmin, std::min(tx1, tx2));
+            tmax = std::min(tmax, std::max(tx1, tx2));
+        }
+    }
+    return tmax >= tmin;
+}
+
+bool traverseBVH(AABBTree::Node node, const Vector3d &ray_origin, const Vector3d &ray_direction, Vector3d &p, Vector3d &N, double *min_t) 
+{
+    // no need to proceed if ray does not interset the box
+    if (!ray_box_intersection(ray_origin, ray_direction, node.bbox)) 
+        return false;
+
+    // if leaf, test if hit the triangle
+    if (node.left < 0 && node.right < 0) {
+        assert(node.triangle >= 0);
+        const Vector3i abc = facets.row(node.triangle); 
+        const Vector3d a = vertices.row(abc(0));
+        const Vector3d b = vertices.row(abc(1));
+        const Vector3d c = vertices.row(abc(2));
+        Vector3d tmp_p, tmp_N;
+        const double intersection_t = ray_triangle_intersection(ray_origin, ray_direction, a, b, c, tmp_p, tmp_N);
+        bool found_hit = false;
+        if (intersection_t > 0)
+        {   
+            if (intersection_t < min_t[0])
+            {
+                found_hit = true;
+                min_t[0] = intersection_t;
+                p = tmp_p;
+                N = tmp_N;
+            }
+        } 
+        return found_hit;
+    }
+    else {
+        // fork into one or two recursive calls;
+        bool Lhit = false;
+        bool Rhit = false;
+        if (node.left >= 0)
+            Lhit = traverseBVH(bvh.nodes[node.left], ray_origin, ray_direction, p, N, min_t);
+        if (node.right >= 0) 
+            Rhit = traverseBVH(bvh.nodes[node.right], ray_origin, ray_direction, p, N, min_t);
+        
+        return Lhit || Rhit;
+    }
 }
 
 //Finds the closest intersecting object returns its index
@@ -183,15 +345,37 @@ bool ray_box_intersection(const Vector3d &ray_origin, const Vector3d &ray_direct
 bool find_nearest_object(const Vector3d &ray_origin, const Vector3d &ray_direction, Vector3d &p, Vector3d &N)
 {
     Vector3d tmp_p, tmp_N;
+    // std::cout << bvh.nodes[bvh.root].parent << std::endl;
+    // std::cout << bvh.nodes.size() << "\n";
 
-    // TODO
     // Method (1): Traverse every triangle and return the closest hit.
+    // double min_t = INFINITY;
+    // bool found_hit = false;
+    // for (unsigned i = 0; i < facets.rows(); i++)
+    // {
+    //     const Vector3d a = vertices.row(facets(i, 0));
+    //     const Vector3d b = vertices.row(facets(i, 1));
+    //     const Vector3d c = vertices.row(facets(i, 2));
+        
+    //     const double intersection_t = ray_triangle_intersection(ray_origin, ray_direction, a, b, c, tmp_p, tmp_N);
+    //     if (intersection_t > 0)
+    //     {   
+    //         if (intersection_t < min_t)
+    //         {
+    //             found_hit = true;
+    //             min_t = intersection_t;
+    //             p = tmp_p;
+    //             N = tmp_N;
+    //         }
+    //     }
+    // }
+    // return found_hit;
+
     // Method (2): Traverse the BVH tree and test the intersection with a
     // triangles at the leaf nodes that intersects the input ray.
-
-    return false;
+    double min_t[1] = {INFINITY};
+    return traverseBVH(bvh.nodes[bvh.root], ray_origin, ray_direction, p, N, min_t);
 }
-
 ////////////////////////////////////////////////////////////////////////////////
 // Raytracer code
 ////////////////////////////////////////////////////////////////////////////////
@@ -261,9 +445,11 @@ void raytrace_scene()
     // The sensor grid is at a distance 'focal_length' from the camera center,
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
-    //TODO
-    double image_y = 1;
-    double image_x = 1;
+    // DONE
+	double tan_half_view = std::tan(field_of_view/2);
+    double L = 2 * tan_half_view * focal_length;
+    double image_y = L / aspect_ratio;  // DONE: compute the correct pixels size
+    double image_x = L;                 // DONE: compute the correct pixels size
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, camera_position[2] - focal_length);
@@ -303,6 +489,7 @@ void raytrace_scene()
 
     // Save to png
     write_matrix_to_png(R, G, B, A, filename);
+    std::cout << "Done" << std::endl;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

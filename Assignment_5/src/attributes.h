@@ -53,4 +53,11 @@ class FrameBufferAttributes
 class UniformAttributes
 {
 	public:
+	UniformAttributes()
+	{
+		
+	}
+	Eigen::Vector3d cameraPosition;
+	Eigen::Vector3d gazeDirection;
+	Eigen::Vector3d viewUpVector;
 };

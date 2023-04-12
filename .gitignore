@@ -2,3 +2,5 @@ Assignment_5/build/*
 Assignment_5/buildRelease/*
 .vscode/*
 */build*/*
+
+.DS_Store

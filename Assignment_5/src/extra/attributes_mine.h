@@ -30,9 +30,13 @@ class VertexAttributes
     {
         VertexAttributes r;
         r.position = alpha*a.position + beta*b.position + gamma*c.position;
-		// the normal of the interpolated point is the normal of the plane that contains the three points
+		// compute the normal vector
+		// Eigen::Vector3d ra = (a.position - r.position).head<3>();
+		// Eigen::Vector3d rc = (c.position - r.position).head<3>();
+		// Eigen::Vector3d normal = ra.cross(rc).normalized();
+		// r.plane_normal = normal.homogeneous(); // 3d -> NDC
 		// this normal is still in world space
-		r.plane_normal = alpha*a.plane_normal + beta*b.plane_normal + gamma*c.plane_normal; 
+		r.plane_normal = a.plane_normal; 
 		// std::cout << normal.dot(ra) << "=" << normal.dot(rc) << " = 0\n";
         return r;
     }
@@ -80,12 +84,12 @@ class UniformAttributes
 	Eigen::Vector3d lbn;
 	Eigen::Vector3d rtf;
 
-	Eigen::Vector3d lightPos;
-	Eigen::Vector3d lineColor;
+	Eigen::MatrixXi facets;
+	Eigen::MatrixXd vertices;
 
+	std::vector<Eigen::Vector3d> light_positions;
+	std::vector<Eigen::Vector4d> light_colors;
 	std::string render_type;
-
-	Eigen::Matrix4d Mview;
 
 	/**
 	 * @brief Get the Morth matrix that maps from camera space to CVV, orthornormal view
@@ -110,15 +114,10 @@ class UniformAttributes
 	Eigen::Matrix4d getMpersp() const
 	{
 		Eigen::Matrix4d Mp;
-		// Mp << lbn[2],	 0,		   		0,				0,
-		// 	  0,	lbn[2],		   		0,				0,
-		// 	  0,	     0,	(lbn[2]+rtf[2]), -lbn[2]*rtf[2],
-		// 	  0,		 0,				0,				1;
-		Mp << 	1, 0, 0, 0,
-				0, 1, 0, 0,
-				0, 0, 1, 0,
-				0, 0, 1, 1;	
-		Mp = Mp * this->getMorth();
+		Mp << lbn[2]/rtf[0],	 0,		   		0,				0,
+			  0,	lbn[2]/rtf[1],		   		0,				0,
+			  0,	     0,	(lbn[2]+rtf[2])/(lbn[2]-rtf[2]), 2*lbn[2]*rtf[2]/(lbn[2]-rtf[2]),
+			  0,		 0,				-1,				0;
 		return Mp;
 	}
 
@@ -151,10 +150,10 @@ class UniformAttributes
 	 */
 	Eigen::Matrix4d getMup() const
 	{
-		double nx = rtf[0]-lbn[0]; double ny = rtf[1]-lbn[1]; // should be positive number
+		double nx = 2; double ny = 2; double nz = 2;
 		Eigen::Matrix4d Mup;
-		Mup << nx/2,    	0,     0, 	   (-1+nx)/2,
-			      0, 	 ny/2, 	   0, 	   (-1+ny)/2,
+		Mup << nx/2,    	0,     0, 	       0,
+			      0, 	 ny/2, 	   0, 	   -ny/2,
 				  0,    	0,	   1,          0,
 				  0, 		0, 	   0,		   1;	
 		return Mup;
